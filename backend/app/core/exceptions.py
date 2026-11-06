@@ -93,6 +93,13 @@ class ConflictException(AppException):
     code = ErrorCode.CONFLICT
 
 
+class ValidationException(AppException):
+    """Raised when the request is syntactically valid but semantically wrong."""
+
+    status_code = 422
+    code = ErrorCode.VALIDATION_ERROR
+
+
 class ServiceUnavailableException(AppException):
     status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     code = ErrorCode.SERVICE_UNAVAILABLE
