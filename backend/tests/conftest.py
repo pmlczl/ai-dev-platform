@@ -56,6 +56,10 @@ if engine.dialect.name == "sqlite":
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA busy_timeout=10000")
+        # SQLite does not enforce foreign keys unless this pragma is switched
+        # on per connection. Without it the suite would never exercise the
+        # ON DELETE CASCADE / SET NULL / RESTRICT rules of the schema.
+        cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 
 
