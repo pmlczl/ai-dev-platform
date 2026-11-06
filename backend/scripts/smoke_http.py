@@ -7,6 +7,7 @@ Run with the server started on the target port:
 
 from __future__ import annotations
 
+import hashlib
 import sys
 import uuid
 
@@ -152,6 +153,116 @@ def main() -> int:
         scoped = client.get(f"/projects/{project_id}/tasks")
         check("GET /projects/{id}/tasks -> 200", scoped.status_code == 200, scoped.text[:200])
         check("scoped task list not empty", len(scoped.json()["items"]) >= 1)
+
+        # --- artifacts -----------------------------------------------------
+        document = "# smoke\n\nfile management smoke test\n"
+        uploaded = client.post(
+            f"/tasks/{task_id}/artifacts",
+            files={"file": ("prd.md", document.encode(), "application/octet-stream")},
+            data={"stage": "design", "relative_path": "docs/prd.md"},
+        )
+        check("POST /tasks/{id}/artifacts -> 201", uploaded.status_code == 201, uploaded.text[:200])
+        artifact = uploaded.json()
+        artifact_id = artifact["id"]
+        check(
+            "upload returns the sha256 of the file",
+            artifact["sha256"] == hashlib.sha256(document.encode()).hexdigest(),
+            artifact["sha256"],
+        )
+        check("upload starts at version 1", artifact["version"] == 1)
+        check("upload starts as pending", artifact["review_status"] == "pending")
+        check("upload records the stage", artifact["stage"] == "design")
+        check(
+            "the storage path stays relative",
+            not artifact["storage_path"].startswith("/"),
+            artifact["storage_path"],
+        )
+
+        metadata = client.get(f"/artifacts/{artifact_id}")
+        check("GET /artifacts/{id} -> 200", metadata.status_code == 200, metadata.text[:200])
+        check(
+            "metadata carries hash, version and stage",
+            {"sha256", "version", "stage", "review_status", "created_at"} <= set(metadata.json()),
+            str(sorted(metadata.json())),
+        )
+
+        download = client.get(f"/artifacts/{artifact_id}/download")
+        check(
+            "GET /artifacts/{id}/download -> 200",
+            download.status_code == 200,
+            download.text[:200],
+        )
+        check("download returns the original bytes", download.content == document.encode())
+        check(
+            "download sets a content disposition",
+            "content-disposition" in {k.lower() for k in download.headers},
+        )
+
+        second = client.post(
+            f"/tasks/{task_id}/artifacts",
+            files={"file": ("prd.md", b"# v2\n", "application/octet-stream")},
+            data={"relative_path": "docs/prd.md"},
+        )
+        check("second upload -> 201", second.status_code == 201, second.text[:200])
+        check("second upload is version 2", second.json()["version"] == 2)
+
+        superseded = client.get(f"/artifacts/{artifact_id}")
+        check(
+            "the previous revision is superseded",
+            superseded.json()["review_status"] == "superseded",
+            superseded.text[:200],
+        )
+
+        revision = client.post(
+            f"/artifacts/{second.json()['id']}/revisions",
+            files={"file": ("prd.md", b"# v3\n", "application/octet-stream")},
+        )
+        check(
+            "POST /artifacts/{id}/revisions -> 201",
+            revision.status_code == 201,
+            revision.text[:200],
+        )
+        check("the revision is version 3", revision.json()["version"] == 3)
+
+        listing = client.get(f"/tasks/{task_id}/artifacts")
+        check("GET /tasks/{id}/artifacts -> 200", listing.status_code == 200, listing.text[:200])
+        check(
+            "the artifact list is paginated",
+            set(listing.json()) == {"items", "total", "page", "page_size", "pages"},
+            str(sorted(listing.json())),
+        )
+        check("the list contains the uploaded files", listing.json()["total"] >= 2)
+
+        reviewed = client.post(
+            f"/artifacts/{revision.json()['id']}/review",
+            json={"decision": "approved", "reviewed_by": "smoke"},
+        )
+        check(
+            "POST /artifacts/{id}/review -> 200",
+            reviewed.status_code == 200,
+            reviewed.text[:200],
+        )
+        check("the file is approved", reviewed.json()["review_status"] == "approved")
+        check("the reviewer is recorded", reviewed.json()["reviewed_by"] == "smoke")
+
+        forbidden = client.post(
+            f"/tasks/{task_id}/artifacts",
+            files={"file": ("payload.exe", b"MZ\x90\x00", "application/octet-stream")},
+        )
+        check(
+            "POST an unknown file type -> 422",
+            forbidden.status_code == 422,
+            forbidden.text[:200],
+        )
+
+        missing_artifact = client.get(
+            "/artifacts/00000000-0000-4000-8000-000000000000/download",
+        )
+        check(
+            "GET an unknown artifact -> 404",
+            missing_artifact.status_code == 404,
+            missing_artifact.text[:200],
+        )
 
         deleted = client.delete(f"/projects/{project_id}")
         check("DELETE /projects/{id} -> 204", deleted.status_code == 204, deleted.text[:200])

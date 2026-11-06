@@ -39,6 +39,7 @@ class ErrorCode(StrEnum):
     NOT_FOUND = "NOT_FOUND"
     METHOD_NOT_ALLOWED = "METHOD_NOT_ALLOWED"
     CONFLICT = "CONFLICT"
+    PAYLOAD_TOO_LARGE = "PAYLOAD_TOO_LARGE"
     UNAUTHORIZED = "UNAUTHORIZED"
     FORBIDDEN = "FORBIDDEN"
     NOT_IMPLEMENTED = "NOT_IMPLEMENTED"
@@ -52,8 +53,9 @@ _STATUS_TO_CODE = {
     status.HTTP_404_NOT_FOUND: ErrorCode.NOT_FOUND,
     status.HTTP_405_METHOD_NOT_ALLOWED: ErrorCode.METHOD_NOT_ALLOWED,
     status.HTTP_409_CONFLICT: ErrorCode.CONFLICT,
-    # 422 is written as a literal: the starlette constant is deprecated and the
-    # numeric value is stable across framework versions.
+    # 413 and 422 are written as literals: the starlette constants are
+    # deprecated and the numeric values are stable across framework versions.
+    413: ErrorCode.PAYLOAD_TOO_LARGE,
     422: ErrorCode.VALIDATION_ERROR,
     status.HTTP_501_NOT_IMPLEMENTED: ErrorCode.NOT_IMPLEMENTED,
     status.HTTP_503_SERVICE_UNAVAILABLE: ErrorCode.SERVICE_UNAVAILABLE,
@@ -103,6 +105,13 @@ class ValidationException(AppException):
 class ServiceUnavailableException(AppException):
     status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     code = ErrorCode.SERVICE_UNAVAILABLE
+
+
+class PayloadTooLargeException(AppException):
+    """Raised when an uploaded file exceeds the configured size limit."""
+
+    status_code = 413
+    code = ErrorCode.PAYLOAD_TOO_LARGE
 
 
 def build_error_payload(

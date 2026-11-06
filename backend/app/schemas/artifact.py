@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.enums import ArtifactReviewStatus
+from app.models.enums import ArtifactReviewStatus, ArtifactStage
 
 #: A SHA256 digest is exactly 64 hexadecimal characters.
 SHA256_PATTERN = r"^[0-9a-fA-F]{64}$"
@@ -28,6 +29,25 @@ class ArtifactRegister(BaseModel):
     task_id: UUID | None = None
     workflow_instance_id: UUID | None = None
     created_by: str | None = Field(default=None, max_length=120)
+    stage: ArtifactStage = ArtifactStage.DEVELOPMENT
+
+
+class ArtifactReviewRequest(BaseModel):
+    """Payload for moving an artifact into a reviewed state.
+
+    ``superseded`` is managed by the platform when a new revision appears and
+    therefore cannot be requested here.
+    """
+
+    decision: Literal["approved", "rejected"] = Field(
+        description="人工审核结论：approved 通过，rejected 驳回",
+    )
+    reviewed_by: str = Field(
+        min_length=1,
+        max_length=120,
+        description="审核人，会写入审核轨迹",
+    )
+    comment: str | None = Field(default=None, max_length=2000)
 
 
 class ArtifactRead(BaseModel):
@@ -48,5 +68,8 @@ class ArtifactRead(BaseModel):
     reviewed_by: str | None = None
     reviewed_at: datetime | None = None
     created_by: str | None = None
+    stage: ArtifactStage
+    original_filename: str | None = None
+    storage_path: str | None = None
     created_at: datetime
     updated_at: datetime

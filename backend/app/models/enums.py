@@ -64,6 +64,16 @@ class ArtifactReviewStatus(StrEnum):
     SUPERSEDED = "superseded"
 
 
+class ArtifactStage(StrEnum):
+    """Development stage an artifact belongs to."""
+
+    DESIGN = "design"
+    DEVELOPMENT = "development"
+    TESTING = "testing"
+    DELIVERY = "delivery"
+    OTHER = "other"
+
+
 class ApprovalDecision(StrEnum):
     """Outcome of a single approval record."""
 

@@ -75,7 +75,38 @@ class Settings(BaseSettings):
     db_pool_recycle: int = 1800
     db_pool_pre_ping: bool = True
 
+    # --- File storage ----------------------------------------------------
+    #: Root directory of the file storage. ``None`` means ``backend/storage``.
+    storage_root: str | None = None
+    #: Maximum size of a single uploaded file in bytes (50 MiB by default).
+    storage_max_upload_size: int = 50 * 1024 * 1024
+    #: Comma separated list of the file extensions that may be uploaded.
+    storage_allowed_extensions: str = "pdf,docx,md,markdown,txt,json,yaml,yml"
+
     # --- Derived helpers -------------------------------------------------
+
+    @property
+    def storage_root_path(self) -> Path:
+        """Absolute path of the file storage root directory.
+
+        The directory is resolved against the backend package, not against the
+        current working directory, so the service finds the same files no
+        matter where it was started from.
+        """
+
+        if self.storage_root:
+            return Path(self.storage_root).expanduser().resolve()
+        return (BACKEND_DIR / "storage").resolve()
+
+    @property
+    def allowed_upload_extensions(self) -> frozenset[str]:
+        """Lower case extensions (without the dot) that may be uploaded."""
+
+        return frozenset(
+            part.strip().lower().lstrip(".")
+            for part in self.storage_allowed_extensions.split(",")
+            if part.strip()
+        )
 
     @property
     def cors_origin_list(self) -> list[str]:

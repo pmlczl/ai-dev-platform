@@ -1,6 +1,6 @@
 # AI Dev Platform
 
-前后端分离、模块化单体架构的基础工程。当前版本完成工程骨架与通用能力（配置、日志、异常、跨域、API 文档、健康检查、数据库迁移链路、容器化），并实现了**数据库设计与项目管理模块**（项目 / 任务 / 工作流实例 / 产物 / 审批记录五张业务表与对应 REST API），**AI Agent 业务功能尚未实现**。
+前后端分离、模块化单体架构的基础工程。当前版本完成工程骨架与通用能力（配置、日志、异常、跨域、API 文档、健康检查、数据库迁移链路、容器化），并实现了**数据库设计与项目管理模块**（项目 / 任务 / 工作流实例 / 产物 / 审批记录五张业务表与对应 REST API）和**中间文件管理模块**（上传 / 下载 / 元数据 / 版本管理 / SHA256 / 文件状态），**AI Agent 业务功能尚未实现**。
 
 ## 技术栈
 
@@ -23,16 +23,17 @@ ai-dev-platform/
 │   │   │   ├── deps.py             # 共享依赖（分页参数等）
 │   │   │   └── v1/
 │   │   │       ├── router.py       # v1 路由聚合
-│   │   │       └── endpoints/      # health.py / projects.py / tasks.py
-│   │   ├── core/                   # config / logging / exceptions / database / middleware
+│   │   │       └── endpoints/      # health.py / projects.py / tasks.py / artifacts.py
+│   │   ├── core/                   # config / logging / exceptions / database / middleware / storage
 │   │   ├── models/                 # SQLAlchemy 声明式模型与 Base（enums / project / task / workflow / artifact / approval）
 │   │   ├── schemas/                # Pydantic 请求响应模型（common 分页信封 / project / task / workflow / artifact / approval）
-│   │   ├── services/               # 业务服务层（projects / tasks / artifacts / approvals）
+│   │   ├── services/               # 业务服务层（projects / tasks / artifacts / artifact_types / approvals）
 │   │   ├── workflows/              # LangGraph 工作流抽象与注册表
 │   │   └── agents/                 # Agent 目录（仅占位）
 │   ├── alembic/                    # 迁移脚本与 versions/
 │   ├── alembic.ini
-│   ├── scripts/                    # 跨平台数据库初始化脚本（init_db.py / .sh / .ps1）
+│   ├── scripts/                    # 跨平台数据库初始化脚本（init_db.py / .sh / .ps1）与 HTTP 冒烟脚本
+│   ├── storage/                    # 文件存储根目录（默认位置，已在 .gitignore 中）
 │   ├── tests/                      # pytest 测试
 │   ├── pyproject.toml
 │   └── Dockerfile
@@ -129,6 +130,9 @@ dotenv 加载顺序（后端）：`<仓库根>/.env` → `<仓库根>/backend/.e
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | postgres / 空 / ai_dev_platform | 数据库凭据 |
 | `DATABASE_URL` | 空 | 完整 DSN，设置后覆盖上面的 `POSTGRES_*` |
 | `DB_ECHO` / `DB_POOL_*` | false / 5 / 10 / … | 连接池与 SQL 打印 |
+| `STORAGE_ROOT` | `backend/storage` | 上传文件的独立存储根目录（相对路径按 `backend/` 解析） |
+| `STORAGE_MAX_UPLOAD_SIZE` | 52428800 | 单个上传文件的大小上限（字节，默认 50 MiB） |
+| `STORAGE_ALLOWED_EXTENSIONS` | pdf,docx,md,markdown,txt,json,yaml,yml | 允许上传的扩展名白名单 |
 
 后端容器通过 `DATABASE_URL` 或 `POSTGRES_*` 指向 Compose 内的 `db` 服务；本地开发时 `POSTGRES_HOST=localhost` 指向本机或容器映射出的 5432 端口。
 
@@ -250,8 +254,27 @@ TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/ai_dev_p
 }
 ```
 
+### 文件管理接口
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `POST` | `/api/v1/tasks/{task_id}/artifacts` | 上传文件（multipart：`file` 必填，`relative_path`、`stage`、`created_by` 可选），201 |
+| `GET` | `/api/v1/artifacts/{artifact_id}` | 文件元数据（阶段、版本、SHA256、审核状态、创建时间等） |
+| `GET` | `/api/v1/artifacts/{artifact_id}/download` | 下载文件内容，响应头含 `X-Content-SHA256` |
+| `GET` | `/api/v1/tasks/{task_id}/artifacts` | 分页查询，支持 `review_status`、`stage`、`keyword` |
+| `POST` | `/api/v1/artifacts/{artifact_id}/revisions` | 为已有文件创建新版本，旧版本转 `superseded`，201 |
+| `POST` | `/api/v1/artifacts/{artifact_id}/review` | 人工审核，状态推进到 `approved` / `rejected` |
+
+文件落盘规则：
+
+- 文件存放在 `STORAGE_ROOT` 指向的独立目录，数据库只保存**相对路径**与元数据，不保存绝对路径。
+- 物理路径形如 `projects/<project_id>/tasks/<task_id>/v<version>/<相对路径>`，版本号是路径的一段，因此历史版本不可能被覆盖；落盘使用独占创建（`xb`）并在就位时用硬链接原子改名。
+- 扩展名白名单（`STORAGE_ALLOWED_EXTENSIONS`）之外的文件返回 422；文件内容还会按类型做嗅探校验（PDF 文件头、DOCX 压缩包结构、JSON 可解析、文本 UTF-8 可解码），不匹配同样返回 422。
+- 超过 `STORAGE_MAX_UPLOAD_SIZE` 的文件返回 413，且不会在磁盘上留下残留。
+- 文件名与 `relative_path` 中的路径分隔符、`..` 会被拒绝，防止路径穿越。
+
 ## 当前阶段与后续
 
-已完成：工程骨架、配置与日志、统一异常、跨域、API 文档、健康检查、Alembic 迁移链路、前端基础布局、容器化；数据库设计与项目管理模块（5 张业务表、迁移脚本、项目/任务 REST API、分页与参数校验、pytest 用例）。
+已完成：工程骨架、配置与日志、统一异常、跨域、API 文档、健康检查、Alembic 迁移链路、前端基础布局、容器化；数据库设计与项目管理模块（5 张业务表、迁移脚本、项目/任务 REST API、分页与参数校验、pytest 用例）；中间文件管理模块（文件上传 / 下载 / 元数据 / 版本管理 / SHA256 / 文件状态，扩展名白名单与内容嗅探、路径穿越与超限防护）。
 
-未实现（后续阶段）：`workflow_instances` / `artifacts` / `approval_records` 的对外 HTTP 接口（表与服务层已就绪）、前端项目管理页面、AI Agent 与工作流实现、认证与权限、CI/CD。
+未实现（后续阶段）：`workflow_instances` 的对外 HTTP 接口（表与服务层已就绪）、前端项目管理页面、AI Agent 与工作流实现、认证与权限、CI/CD。

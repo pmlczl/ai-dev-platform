@@ -45,6 +45,11 @@ TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL") or (
 # before the application modules are loaded.
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 
+# The file storage root is injected the same way: the uploaded files of the
+# test session must never end up in the storage directory of a developer.
+os.environ.setdefault("STORAGE_ROOT", str(_TMP_DIR / "storage"))
+
+from app.core.config import get_settings  # noqa: E402
 from app.core.database import SessionLocal, engine  # noqa: E402
 from app.main import create_app  # noqa: E402
 
@@ -126,3 +131,31 @@ def project_payload(unique_code: str) -> dict[str, object]:
         "description": "由 pytest 创建",
         "owner": "tester",
     }
+
+
+@pytest.fixture()
+def storage_root(tmp_path, monkeypatch) -> Iterator[Path]:
+    """Point the file storage at a directory that is removed after the test.
+
+    The settings are cached, so the cache is cleared whenever the root
+    directory changes.
+    """
+
+    root = tmp_path / "storage"
+    monkeypatch.setenv("STORAGE_ROOT", str(root))
+    get_settings.cache_clear()
+    yield root
+    get_settings.cache_clear()
+
+
+@pytest.fixture()
+def task_id(client, project_payload) -> str:
+    """Create a task and return its identifier."""
+
+    project = client.post("/api/v1/projects", json=project_payload).json()
+    response = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "title": "文件管理测试任务"},
+    )
+    assert response.status_code == 201
+    return response.json()["id"]

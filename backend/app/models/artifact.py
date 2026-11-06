@@ -19,7 +19,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin
-from app.models.enums import ArtifactReviewStatus, sql_values
+from app.models.enums import ArtifactReviewStatus, ArtifactStage, sql_values
 
 
 class Artifact(Base, TimestampMixin):
@@ -32,6 +32,10 @@ class Artifact(Base, TimestampMixin):
 
     A new revision is appended as a new row; the previous revision is then
     marked as ``superseded`` instead of being overwritten.
+
+    ``storage_path`` is the location of the file on disk, relative to the
+    configured storage root. It is ``NULL`` for artifacts that were only
+    registered as metadata without a physical file.
     """
 
     __tablename__ = "artifacts"
@@ -41,6 +45,10 @@ class Artifact(Base, TimestampMixin):
             f"review_status IN ({sql_values(ArtifactReviewStatus)})",
             name="review_status_valid",
         ),
+        CheckConstraint(
+            f"stage IN ({sql_values(ArtifactStage)})",
+            name="stage_valid",
+        ),
         CheckConstraint("version >= 1", name="version_valid"),
         CheckConstraint("size_bytes IS NULL OR size_bytes >= 0", name="size_bytes_valid"),
         UniqueConstraint(
@@ -49,11 +57,17 @@ class Artifact(Base, TimestampMixin):
             "version",
             name="uq_artifacts_project_path_version",
         ),
+        UniqueConstraint(
+            "storage_path",
+            name="uq_artifacts_storage_path",
+        ),
         Index("ix_artifacts_project_id", "project_id"),
+        Index("ix_artifacts_project_id_task_id", "project_id", "task_id"),
         Index("ix_artifacts_task_id", "task_id"),
         Index("ix_artifacts_workflow_instance_id", "workflow_instance_id"),
         Index("ix_artifacts_sha256", "sha256"),
         Index("ix_artifacts_review_status", "review_status"),
+        Index("ix_artifacts_stage", "stage"),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
@@ -88,3 +102,11 @@ class Artifact(Base, TimestampMixin):
         nullable=True,
     )
     created_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    stage: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default=ArtifactStage.DEVELOPMENT.value,
+        server_default=ArtifactStage.DEVELOPMENT.value,
+    )
+    original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    storage_path: Mapped[str | None] = mapped_column(String(500), nullable=True)

@@ -60,11 +60,16 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-ai_dev_platform}
+      STORAGE_ROOT: /app/storage
+      STORAGE_MAX_UPLOAD_SIZE: ${STORAGE_MAX_UPLOAD_SIZE:-52428800}
+      STORAGE_ALLOWED_EXTENSIONS: ${STORAGE_ALLOWED_EXTENSIONS:-pdf,docx,md,markdown,txt,json,yaml,yml}
     depends_on:
       migrate:
         condition: service_completed_successfully
     ports:
       - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - storage_data:/app/storage
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/v1/health"]
       interval: 15s
@@ -88,3 +93,4 @@ services:
 
 volumes:
   postgres_data:
+  storage_data:

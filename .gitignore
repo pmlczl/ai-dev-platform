@@ -37,6 +37,10 @@ pnpm-debug.log*
 *.sqlite3
 postgres_data/
 
+# ---- Uploaded files ----
+storage/
+backend/storage/
+
 # ---- Editors / OS ----
 .idea/
 .vscode/
