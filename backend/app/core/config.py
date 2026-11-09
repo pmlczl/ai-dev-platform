@@ -83,7 +83,62 @@ class Settings(BaseSettings):
     #: Comma separated list of the file extensions that may be uploaded.
     storage_allowed_extensions: str = "pdf,docx,md,markdown,txt,json,yaml,yml"
 
+    # --- Workflow checkpointer -------------------------------------------
+    #: Backend that persists the LangGraph checkpoints.
+    #: ``postgres`` is the production backend, ``sqlite`` is used for local
+    #: development and the test suite, ``memory`` keeps them in RAM.
+    workflow_checkpoint_backend: str = "sqlite"
+    #: DSN of the PostgreSQL database that holds the checkpoints. It defaults
+    #: to a dedicated database derived from the ``POSTGRES_*`` variables so
+    #: that the checkpointer tables never mix with the business schema.
+    checkpoint_database_url: str | None = None
+    #: File that holds the SQLite checkpoints (local development and tests).
+    workflow_sqlite_checkpoint_path: str | None = None
+    #: Registry key of the workflow that is started when the caller does not
+    #: name one.
+    workflow_default_key: str = "dev_workflow"
+    #: Upper bound of the rework rounds of a single workflow instance.
+    workflow_max_iterations: int = 3
+
     # --- Derived helpers -------------------------------------------------
+
+    @property
+    def checkpoint_backend(self) -> str:
+        """Normalised name of the configured checkpointer backend."""
+
+        return self.workflow_checkpoint_backend.strip().lower()
+
+    @property
+    def sqlite_checkpoint_path(self) -> Path:
+        """Absolute path of the SQLite checkpoint file."""
+
+        if self.workflow_sqlite_checkpoint_path:
+            return Path(self.workflow_sqlite_checkpoint_path).expanduser().resolve()
+        return (BACKEND_DIR / ".checkpoint" / "checkpoints.sqlite").resolve()
+
+    @property
+    def checkpoint_database_uri(self) -> str:
+        """psycopg DSN of the PostgreSQL database that holds the checkpoints.
+
+        The DSN is built from the discrete ``POSTGRES_*`` variables (not from
+        ``DATABASE_URL``) because the checkpoints live in their own database.
+        """
+
+        if self.checkpoint_database_url:
+            return self.checkpoint_database_url
+        user = quote_plus(self.postgres_user)
+        password = quote_plus(self.postgres_password)
+        database = self.postgres_db or "ai_dev_platform"
+        return (
+            f"postgresql://{user}:{password}"
+            f"@{self.postgres_host}:{self.postgres_port}/{database}_checkpoints"
+        )
+
+    @property
+    def masked_checkpoint_database_uri(self) -> str:
+        """Checkpoint DSN with the password replaced by ``***`` (safe for logs)."""
+
+        return re.sub(r"://([^:/@]+):[^@]*@", r"://\1:***@", self.checkpoint_database_uri)
 
     @property
     def storage_root_path(self) -> Path:

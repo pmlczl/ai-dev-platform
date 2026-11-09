@@ -26,7 +26,9 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: ai-dev-platform-migrate
-    command: ["alembic", "upgrade", "head"]
+    # init_db.py creates the business database and the checkpoint database when
+    # they are missing and then brings the schema up to the latest revision.
+    command: ["python", "scripts/init_db.py"]
     restart: "no"
     environment:
       ENVIRONMENT: ${ENVIRONMENT:-development}
@@ -37,6 +39,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-ai_dev_platform}
       DATABASE_URL: >-
         postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-ai_dev_platform}
+      CHECKPOINT_DATABASE_URL: >-
+        postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${CHECKPOINT_POSTGRES_DB:-ai_dev_platform_checkpoints}
     depends_on:
       db:
         condition: service_healthy
@@ -63,6 +67,11 @@ services:
       STORAGE_ROOT: /app/storage
       STORAGE_MAX_UPLOAD_SIZE: ${STORAGE_MAX_UPLOAD_SIZE:-52428800}
       STORAGE_ALLOWED_EXTENSIONS: ${STORAGE_ALLOWED_EXTENSIONS:-pdf,docx,md,markdown,txt,json,yaml,yml}
+      WORKFLOW_CHECKPOINT_BACKEND: postgres
+      CHECKPOINT_DATABASE_URL: >-
+        postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${CHECKPOINT_POSTGRES_DB:-ai_dev_platform_checkpoints}
+      WORKFLOW_DEFAULT_KEY: ${WORKFLOW_DEFAULT_KEY:-dev_workflow}
+      WORKFLOW_MAX_ITERATIONS: ${WORKFLOW_MAX_ITERATIONS:-3}
     depends_on:
       migrate:
         condition: service_completed_successfully

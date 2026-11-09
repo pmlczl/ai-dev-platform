@@ -22,6 +22,9 @@ class ApprovalAppend(BaseModel):
     decision: ApprovalDecision
     approver: str = Field(min_length=1, max_length=120)
     comment: str | None = Field(default=None, max_length=5000)
+    #: Optional idempotency key. Together with the target it makes a repeated
+    #: submission a no-op instead of a second record.
+    idempotency_key: str | None = Field(default=None, max_length=120)
 
 
 class ApprovalRecordRead(BaseModel):

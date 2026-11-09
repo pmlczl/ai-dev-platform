@@ -77,16 +77,41 @@ async def append_approval(session: AsyncSession, payload: ApprovalAppend) -> App
         comment=payload.comment,
         approver=payload.approver,
         sequence=sequence,
+        idempotency_key=payload.idempotency_key,
     )
     session.add(record)
     try:
         await session.commit()
     except IntegrityError as exc:
         await session.rollback()
+        if payload.idempotency_key is not None:
+            # The same idempotency key was used for this target before.
+            raise ConflictException("该审批请求已处理，请勿重复提交") from exc
         raise ConflictException("审批记录顺序冲突，请重试") from exc
 
     await session.refresh(record)
     return record
+
+
+async def find_approval_by_idempotency_key(
+    session: AsyncSession,
+    target_type: ApprovalTargetType,
+    target_id: UUID,
+    idempotency_key: str,
+) -> ApprovalRecord | None:
+    """Return the approval record that carries the given idempotency key.
+
+    The lookup is the replay detection of the approval flow: a record that is
+    already there means that the decision was taken and must not be applied a
+    second time.
+    """
+
+    stmt = select(ApprovalRecord).where(
+        ApprovalRecord.target_type == target_type.value,
+        ApprovalRecord.target_id == target_id,
+        ApprovalRecord.idempotency_key == idempotency_key,
+    )
+    return (await session.execute(stmt)).scalars().first()
 
 
 async def list_approvals(

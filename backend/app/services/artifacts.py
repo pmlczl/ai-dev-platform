@@ -14,7 +14,7 @@ to overwrite an existing revision by accident.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterable
+from collections.abc import AsyncIterable, AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -39,6 +39,7 @@ from app.core.storage import (
     remove_file,
     resolve_within_root,
     sanitize_filename,
+    sha256_of_file,
     storage_root,
     temp_dir,
     write_stream_exclusive,
@@ -452,5 +453,106 @@ async def review_artifact(
     artifact.reviewed_by = payload.reviewed_by
     artifact.reviewed_at = datetime.now(UTC)
     await session.commit()
+    await session.refresh(artifact)
+    return artifact
+
+
+async def _content_chunks(content: str) -> AsyncIterator[bytes]:
+    """Yield the content of a generated file as a single chunk."""
+
+    yield content.encode("utf-8")
+
+
+async def store_workflow_artifact(
+    session: AsyncSession,
+    *,
+    workflow_instance_id: UUID,
+    task_id: UUID,
+    relative_path: str,
+    content: str,
+    created_by: str | None = None,
+) -> Artifact:
+    """Store the artifact a workflow iteration produces - idempotently.
+
+    The logical path is derived from the workflow instance and the iteration,
+    so a node that is replayed after a restart finds the artifact that is
+    already there instead of creating a second one. The same holds when the
+    process died between writing the file and committing the row: the file is
+    reused and its digest is read from disk.
+    """
+
+    task = await get_task(session, task_id)
+    project_id = task.project_id
+    logical_path = normalize_relative_path(relative_path)
+    stored_name = PurePosixPath(logical_path).name
+
+    existing = (
+        await session.execute(
+            select(Artifact).where(
+                Artifact.project_id == project_id,
+                Artifact.relative_path == logical_path,
+            )
+        )
+    ).scalars().first()
+    if existing is not None:
+        return existing
+
+    upload = FileUpload(filename=stored_name, chunks=_content_chunks(content))
+    file_type, _ = _file_type_of(logical_path)
+    version = 1
+    storage_path = build_storage_path(
+        project_id=str(project_id),
+        task_id=str(task_id),
+        relative_path=logical_path,
+        version=version,
+    )
+    try:
+        storage_path, file_type, size, digest = await _store_file(
+            upload=upload,
+            logical_path=logical_path,
+            project_id=project_id,
+            task_id=task_id,
+            version=version,
+        )
+    except ConflictException:
+        # The file was written by an earlier run that died before the row was
+        # committed. The existing file is reused instead of overwritten.
+        path = resolve_within_root(storage_path)
+        size = path.stat().st_size
+        digest = sha256_of_file(path)
+
+    artifact = Artifact(
+        project_id=project_id,
+        task_id=task_id,
+        workflow_instance_id=workflow_instance_id,
+        relative_path=logical_path,
+        version=version,
+        sha256=digest,
+        file_type=file_type,
+        size_bytes=size,
+        review_status=ArtifactReviewStatus.PENDING.value,
+        stage=ArtifactStage.DEVELOPMENT.value,
+        original_filename=stored_name,
+        storage_path=storage_path,
+        created_by=created_by,
+    )
+    session.add(artifact)
+    try:
+        await session.commit()
+    except IntegrityError:
+        # Another run created the row in the meantime.
+        await session.rollback()
+        existing = (
+            await session.execute(
+                select(Artifact).where(
+                    Artifact.project_id == project_id,
+                    Artifact.relative_path == logical_path,
+                )
+            )
+        ).scalars().first()
+        if existing is None:  # pragma: no cover - defensive
+            raise
+        return existing
+
     await session.refresh(artifact)
     return artifact

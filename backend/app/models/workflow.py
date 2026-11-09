@@ -12,6 +12,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     String,
     Text,
     Uuid,
@@ -33,6 +34,10 @@ class WorkflowInstance(Base, TimestampMixin):
 
     ``task_id`` is nullable: a NULL value marks a project level workflow that
     is not bound to a single task.
+
+    ``thread_id`` is the key the LangGraph checkpointer stores the graph state
+    under. It is derived from the instance id (``wf-<id>``) and never taken
+    from a client, so a browser cannot address another thread.
     """
 
     __tablename__ = "workflow_instances"
@@ -42,6 +47,10 @@ class WorkflowInstance(Base, TimestampMixin):
             f"status IN ({sql_values(WorkflowStatus)})",
             name="status_valid",
         ),
+        # A unique index instead of a unique constraint: SQLite cannot add a
+        # constraint to an existing table, and the table must not be rebuilt -
+        # other tables reference it.
+        Index("uq_workflow_instances_thread_id", "thread_id", unique=True),
         Index("ix_workflow_instances_project_id", "project_id"),
         Index("ix_workflow_instances_task_id", "task_id"),
         Index("ix_workflow_instances_status", "status"),
@@ -49,6 +58,7 @@ class WorkflowInstance(Base, TimestampMixin):
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    thread_id: Mapped[str] = mapped_column(String(120), nullable=False, server_default="")
     project_id: Mapped[UUID] = mapped_column(
         Uuid,
         ForeignKey("projects.id", ondelete="CASCADE"),
@@ -79,3 +89,25 @@ class WorkflowInstance(Base, TimestampMixin):
         DateTime(timezone=True),
         nullable=True,
     )
+    #: Number of the current generation round; 1 is the first attempt.
+    iteration: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    #: Summary of the pending approval - everything the browser needs to show
+    #: the approval panel. It is written by the workflow itself, never taken
+    #: from a request.
+    pending_payload: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON().with_variant(postgresql.JSONB, "postgresql"),
+        nullable=True,
+    )
+    pending_since: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    #: A decision that has been persisted but not yet consumed by the graph.
+    #: It is the fallback for the crash window between "decision stored" and
+    #: "checkpoint written".
+    pending_decision: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON().with_variant(postgresql.JSONB, "postgresql"),
+        nullable=True,
+    )
+    #: The most recent decision, kept for convenient display.
+    last_decision: Mapped[str | None] = mapped_column(String(32), nullable=True)

@@ -1,10 +1,11 @@
 """Database initialization helper.
 
-The script performs the two steps that are needed before the backend can talk to
-a database:
+The script performs the steps that are needed before the backend can talk to a
+database:
 
-1. create the target database when it does not exist yet (PostgreSQL only),
-2. bring the schema up to the latest revision with Alembic.
+1. create the business database when it does not exist yet (PostgreSQL only),
+2. create the LangGraph checkpoint database - it lives in a database of its own,
+3. bring the schema up to the latest revision with Alembic.
 
 It is platform independent on purpose - the ``init_db.sh`` and ``init_db.ps1``
 wrappers only forward their arguments to this module.
@@ -90,6 +91,44 @@ async def create_database_if_missing(dsn: str) -> bool:
         await engine.dispose()
 
 
+async def create_checkpoint_database_if_missing(dsn: str) -> bool:
+    """Create the LangGraph checkpoint database when it is absent.
+
+    The checkpointer keeps its tables in a database of its own, so the tables
+    never mix with the business schema. The DSN is written for psycopg
+    (``postgresql://``); it is rewritten to the async driver because the
+    creation itself runs on the SQLAlchemy async engine.
+    """
+
+    url = make_url(dsn)
+    if url.get_backend_name() != "postgresql":
+        print(f"[init-db] skip checkpoint database creation: {url.get_backend_name()}")
+        return False
+
+    database = url.database or ""
+    if not SAFE_DB_NAME.match(database):
+        raise SystemExit(
+            f"[init-db] refusing to create a checkpoint database with an unsafe name: {database!r}"
+        )
+
+    maintenance_url = url.set(drivername="postgresql+asyncpg", database="postgres")
+    engine = create_async_engine(maintenance_url, isolation_level="AUTOCOMMIT")
+    try:
+        async with engine.connect() as connection:
+            exists = await connection.scalar(
+                text("SELECT 1 FROM pg_database WHERE datname = :name"),
+                {"name": database},
+            )
+            if exists:
+                print(f"[init-db] checkpoint database {database!r} already exists")
+                return False
+            await connection.execute(text(f'CREATE DATABASE "{database}"'))
+            print(f"[init-db] checkpoint database {database!r} created")
+            return True
+    finally:
+        await engine.dispose()
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point of the initialization script."""
 
@@ -113,8 +152,10 @@ def main(argv: list[str] | None = None) -> int:
 
     settings = get_settings()
     print(f"[init-db] target: {settings.masked_database_uri}")
+    print(f"[init-db] checkpoint target: {settings.masked_checkpoint_database_uri}")
 
     asyncio.run(create_database_if_missing(settings.sqlalchemy_database_uri))
+    asyncio.run(create_checkpoint_database_if_missing(settings.checkpoint_database_uri))
     if args.create_db:
         return 0
 

@@ -49,6 +49,11 @@ os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 # test session must never end up in the storage directory of a developer.
 os.environ.setdefault("STORAGE_ROOT", str(_TMP_DIR / "storage"))
 
+# The LangGraph checkpoints are written to a file as well. It belongs into the
+# temporary directory, so that a test run never touches the checkpoints of a
+# developer and every session starts from a clean state.
+os.environ.setdefault("WORKFLOW_SQLITE_CHECKPOINT_PATH", str(_TMP_DIR / "checkpoints.sqlite"))
+
 from app.core.config import get_settings  # noqa: E402
 from app.core.database import SessionLocal, engine  # noqa: E402
 from app.main import create_app  # noqa: E402

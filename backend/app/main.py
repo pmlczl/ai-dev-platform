@@ -15,10 +15,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import api_router
 from app.core.config import get_settings
-from app.core.database import dispose_engine
+from app.core.database import SessionLocal, dispose_engine
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
 from app.core.middleware import AccessLogMiddleware, RequestContextMiddleware
+from app.services.workflow_runtime import WorkflowRuntime
+from app.services.workflow_store import reconcile_interrupted_instances
 
 logger = get_logger(__name__)
 
@@ -40,9 +42,27 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.environment,
     )
     logger.info("Database DSN: %s", settings.masked_database_uri)
+
+    # The runtime belongs to this application instance: the checkpointer
+    # opens its connection in the event loop of the application, so it has to
+    # be opened and closed together with it.
+    runtime = WorkflowRuntime()
+    await runtime.startup()
+    app.state.workflow_runtime = runtime
+
+    try:
+        async with SessionLocal() as session:
+            recovered = await reconcile_interrupted_instances(session)
+        if recovered:
+            logger.info("Recovered %s workflow instance(s) after the restart", len(recovered))
+    except Exception:  # pragma: no cover - the schema may not exist yet
+        logger.warning("Could not reconcile the workflow instances", exc_info=True)
+
     try:
         yield
     finally:
+        app.state.workflow_runtime = None
+        await runtime.shutdown()
         await dispose_engine()
         logger.info("Application shutdown complete")
 

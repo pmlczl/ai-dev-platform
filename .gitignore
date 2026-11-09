@@ -37,6 +37,10 @@ pnpm-debug.log*
 *.sqlite3
 postgres_data/
 
+# ---- Local scratch data (smoke runs, LangGraph checkpoints) ----
+.smoke/
+.checkpoint/
+
 # ---- Uploaded files ----
 storage/
 backend/storage/

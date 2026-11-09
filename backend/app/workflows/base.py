@@ -30,8 +30,13 @@ class BaseWorkflow(ABC):
     description: ClassVar[str] = ""
 
     @abstractmethod
-    def build_graph(self) -> Any:
+    def build_graph(self, checkpointer: Any | None = None) -> Any:
         """Build and compile the LangGraph graph of this workflow.
+
+        Args:
+            checkpointer: Optional checkpointer the graph is compiled with.
+                It is the object that persists the state of a run; the
+                runtime owns it, the workflow only receives it.
 
         Returns:
             The compiled LangGraph application.
@@ -45,3 +50,11 @@ class BaseWorkflow(ABC):
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
         return f"<{type(self).__name__} name={self.name!r}>"
+
+
+class WorkflowExecutionError(RuntimeError):
+    """Raised when a node cannot continue the workflow.
+
+    The error carries a message that is safe to show to the operator: the
+    workflow service turns it into a failed workflow instance.
+    """

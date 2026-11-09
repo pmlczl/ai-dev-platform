@@ -19,6 +19,7 @@ from app.models.enums import (
 from app.models.project import Project
 from app.models.task import DevelopmentTask
 from app.models.workflow import WorkflowInstance
+from app.models.workflow_event import WorkflowEvent
 
 __all__ = [
     "ApprovalDecision",
@@ -33,6 +34,7 @@ __all__ = [
     "TaskPriority",
     "TaskStatus",
     "TimestampMixin",
+    "WorkflowEvent",
     "WorkflowInstance",
     "WorkflowStatus",
 ]

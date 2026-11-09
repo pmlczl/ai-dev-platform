@@ -53,6 +53,16 @@ class ApprovalRecord(Base):
             "sequence",
             name="uq_approval_records_target_sequence",
         ),
+        # A unique index instead of a unique constraint: SQLite cannot add a
+        # constraint to an existing table. Rows without an idempotency key
+        # carry a NULL, and NULLs never collide in a unique index.
+        Index(
+            "uq_approval_records_target_idempotency",
+            "target_type",
+            "target_id",
+            "idempotency_key",
+            unique=True,
+        ),
         Index("ix_approval_records_project_id", "project_id"),
         Index("ix_approval_records_target_type_target_id", "target_type", "target_id"),
         Index("ix_approval_records_created_at", "created_at"),
@@ -72,6 +82,11 @@ class ApprovalRecord(Base):
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     approver: Mapped[str] = mapped_column(String(120), nullable=False)
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    #: Optional client supplied key that makes a repeated submission a no-op.
+    #: ``NULL`` means "not idempotency guarded" - the column stays part of the
+    #: unique index, and SQL treats NULLs as distinct in both PostgreSQL and
+    #: SQLite, so records without a key never collide.
+    idempotency_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

@@ -1,6 +1,6 @@
 # AI Dev Platform
 
-前后端分离、模块化单体架构的基础工程。当前版本完成工程骨架与通用能力（配置、日志、异常、跨域、API 文档、健康检查、数据库迁移链路、容器化），并实现了**数据库设计与项目管理模块**（项目 / 任务 / 工作流实例 / 产物 / 审批记录五张业务表与对应 REST API）和**中间文件管理模块**（上传 / 下载 / 元数据 / 版本管理 / SHA256 / 文件状态），**AI Agent 业务功能尚未实现**。
+前后端分离、模块化单体架构的基础工程。当前版本完成工程骨架与通用能力（配置、日志、异常、跨域、API 文档、健康检查、数据库迁移链路、容器化），并实现了**数据库设计与项目管理模块**（项目 / 任务 / 工作流实例 / 产物 / 审批记录五张业务表与对应 REST API）、**中间文件管理模块**（上传 / 下载 / 元数据 / 版本管理 / SHA256 / 文件状态）和**LangGraph 研发工作流与人工审批模块**（工作流实例持久化、`interrupt()` 审批暂停、审批记录落库、重启恢复），**AI Agent 业务功能尚未实现**。
 
 ## 技术栈
 
@@ -9,7 +9,7 @@
 | 后端 | Python 3.11、FastAPI、SQLAlchemy 2.x（异步）、Alembic、Pydantic 2、Uvicorn |
 | 前端 | Vue 3、TypeScript、Vite、Element Plus、Pinia、Vue Router、Axios |
 | 数据库 | PostgreSQL 16 |
-| 工作流 | LangGraph（仅保留目录与抽象，尚未接入实际 Agent） |
+| 工作流 | LangGraph 0.6（研发工作流图 + Checkpointer 状态持久化 + 人工审批 interrupt） |
 | 部署 | Docker Compose（后端 + 前端 + PostgreSQL） |
 
 ## 目录结构
@@ -20,19 +20,19 @@ ai-dev-platform/
 │   ├── app/
 │   │   ├── main.py                 # 应用工厂、生命周期、中间件与路由装配
 │   │   ├── api/
-│   │   │   ├── deps.py             # 共享依赖（分页参数等）
+│   │   │   ├── deps.py             # 共享依赖（分页参数、工作流运行时等）
 │   │   │   └── v1/
 │   │   │       ├── router.py       # v1 路由聚合
-│   │   │       └── endpoints/      # health.py / projects.py / tasks.py / artifacts.py
+│   │   │       └── endpoints/      # health.py / projects.py / tasks.py / artifacts.py / workflows.py
 │   │   ├── core/                   # config / logging / exceptions / database / middleware / storage
-│   │   ├── models/                 # SQLAlchemy 声明式模型与 Base（enums / project / task / workflow / artifact / approval）
+│   │   ├── models/                 # SQLAlchemy 声明式模型与 Base（enums / project / task / workflow / workflow_event / artifact / approval）
 │   │   ├── schemas/                # Pydantic 请求响应模型（common 分页信封 / project / task / workflow / artifact / approval）
-│   │   ├── services/               # 业务服务层（projects / tasks / artifacts / artifact_types / approvals）
-│   │   ├── workflows/              # LangGraph 工作流抽象与注册表
+│   │   ├── services/               # 业务服务层（projects / tasks / artifacts / artifact_types / approvals / workflows / workflow_runtime / workflow_store）
+│   │   ├── workflows/              # LangGraph 工作流抽象、注册表与研发工作流实现（dev_workflow.py）
 │   │   └── agents/                 # Agent 目录（仅占位）
 │   ├── alembic/                    # 迁移脚本与 versions/
 │   ├── alembic.ini
-│   ├── scripts/                    # 跨平台数据库初始化脚本（init_db.py / .sh / .ps1）与 HTTP 冒烟脚本
+│   ├── scripts/                    # 跨平台数据库初始化脚本（init_db.py / .sh / .ps1）与 HTTP 冒烟脚本（smoke_workflow.py）
 │   ├── storage/                    # 文件存储根目录（默认位置，已在 .gitignore 中）
 │   ├── tests/                      # pytest 测试
 │   ├── pyproject.toml
@@ -50,7 +50,9 @@ ai-dev-platform/
 │   ├── vite.config.ts
 │   └── Dockerfile
 ├── docs/
-│   └── iteration2_db_design.md     # 数据库设计与实施计划（第二轮）
+│   ├── iteration2_db_design.md     # 数据库设计与实施计划（第二轮）
+│   ├── iteration3_artifact_storage.md
+│   └── iteration4_langgraph_workflow.md  # LangGraph 研发工作流与人工审批（第四轮）
 ├── docker-compose.yml
 ├── .env.example
 ├── .gitignore
@@ -133,6 +135,11 @@ dotenv 加载顺序（后端）：`<仓库根>/.env` → `<仓库根>/backend/.e
 | `STORAGE_ROOT` | `backend/storage` | 上传文件的独立存储根目录（相对路径按 `backend/` 解析） |
 | `STORAGE_MAX_UPLOAD_SIZE` | 52428800 | 单个上传文件的大小上限（字节，默认 50 MiB） |
 | `STORAGE_ALLOWED_EXTENSIONS` | pdf,docx,md,markdown,txt,json,yaml,yml | 允许上传的扩展名白名单 |
+| `WORKFLOW_CHECKPOINT_BACKEND` | sqlite（Compose 中为 postgres） | 工作流检查点后端：`postgres` / `sqlite` / `memory` |
+| `CHECKPOINT_DATABASE_URL` | 空 | PostgreSQL 检查点 DSN；为空时由 `POSTGRES_*` 拼装成 `<db>_checkpoints` 库 |
+| `WORKFLOW_SQLITE_CHECKPOINT_PATH` | `backend/.checkpoint/checkpoints.sqlite` | SQLite 检查点文件路径 |
+| `WORKFLOW_DEFAULT_KEY` | dev_workflow | 未指定时启动的默认工作流注册名 |
+| `WORKFLOW_MAX_ITERATIONS` | 3 | 返工迭代上限，超限判定工作流失败 |
 
 后端容器通过 `DATABASE_URL` 或 `POSTGRES_*` 指向 Compose 内的 `db` 服务；本地开发时 `POSTGRES_HOST=localhost` 指向本机或容器映射出的 5432 端口。
 
@@ -184,8 +191,11 @@ python -m alembic upgrade head --sql            # 离线渲染 SQL，不连库
 | --- | --- |
 | `0001_baseline` | 仅锚定版本链，不建表 |
 | `0002_project_management` | 创建 `projects` / `development_tasks` / `workflow_instances` / `artifacts` / `approval_records` |
+| `0003_artifact_storage` | 为 `artifacts` 增加存储字段（`storage_path`、`original_filename`、`stage` 等） |
+| `0004_workflow_engine` | `workflow_instances` 增加 `thread_id` / `iteration` / `pending_*` 等列，创建 `workflow_events`，`approval_records` 增加 `idempotency_key` |
 
-表结构与索引设计详见 [docs/iteration2_db_design.md](./docs/iteration2_db_design.md)。
+表结构与索引设计详见 [docs/iteration2_db_design.md](./docs/iteration2_db_design.md)，
+工作流引擎的表结构详见 [docs/iteration4_langgraph_workflow.md](./docs/iteration4_langgraph_workflow.md)。
 
 ## 测试与检查
 
@@ -206,6 +216,16 @@ npm run build
 ```bash
 TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/ai_dev_platform_test \
     python -m pytest -q
+```
+
+工作流的端到端冒烟（需要本地可用的数据库；默认写 `.smoke/` 下的临时文件）：
+
+```bash
+cd backend
+DATABASE_URL="sqlite+aiosqlite:///./.smoke/workflow.db" \
+STORAGE_ROOT="./.smoke/storage" \
+WORKFLOW_SQLITE_CHECKPOINT_PATH="./.smoke/checkpoints.sqlite" \
+    python -m scripts.smoke_workflow
 ```
 
 ## API 约定
@@ -273,8 +293,33 @@ TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/ai_dev_p
 - 超过 `STORAGE_MAX_UPLOAD_SIZE` 的文件返回 413，且不会在磁盘上留下残留。
 - 文件名与 `relative_path` 中的路径分隔符、`..` 会被拒绝，防止路径穿越。
 
+### 工作流与人工审批接口
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `POST` | `/api/v1/tasks/{task_id}/workflow/start` | 为任务启动研发工作流并同步跑到第一个审批点，201 |
+| `GET` | `/api/v1/workflows/{workflow_id}` | 工作流视图（状态、当前产物、待审批摘要、审批记录） |
+| `POST` | `/api/v1/workflows/{workflow_id}/resume` | 提交人工审批结果，或从检查点继续推进 |
+| `GET` | `/api/v1/workflows/{workflow_id}/logs` | 工作流事件日志（平台自有表，非 LangGraph 内部状态） |
+
+工作流语义：
+
+- 节点全部为**本地模拟**，不调用任何大模型：`load_task` → `generate_demo_artifact` → `validate_artifact`
+  → `human_approval`（`interrupt()` 暂停）→ `complete_workflow`；审批退回则进入
+  `handle_revision_comments` 并重新生成下一轮产物。
+- 每个工作流实例一个独立 `thread_id`（服务端派生为 `wf-{workflow_instance_id}`），
+  状态由 Checkpointer 持久化（生产 PostgreSQL / 本地与测试 SQLite），服务重启后仍在。
+- `resume` 请求里的 `thread_id` 只做一致性断言，不一致返回 409；**浏览器无法直接读写 LangGraph 内部状态**，
+  响应里没有任何 checkpoint / state 字段。
+- 审批决定**先落库再推进流程**（`approval_records` + `workflow_instances.pending_decision`），
+  因此「决定已入库、进程崩溃」也不会丢失或重复消费；重复提交由 `idempotency_key` 去重，
+  已处理过的轮次返回 409。
+- 审批记录只追加不修改，全过程留痕于 `workflow_events`（幂等键 `event_key`）。
+
+详细设计与验证记录见 [docs/iteration4_langgraph_workflow.md](./docs/iteration4_langgraph_workflow.md)。
+
 ## 当前阶段与后续
 
-已完成：工程骨架、配置与日志、统一异常、跨域、API 文档、健康检查、Alembic 迁移链路、前端基础布局、容器化；数据库设计与项目管理模块（5 张业务表、迁移脚本、项目/任务 REST API、分页与参数校验、pytest 用例）；中间文件管理模块（文件上传 / 下载 / 元数据 / 版本管理 / SHA256 / 文件状态，扩展名白名单与内容嗅探、路径穿越与超限防护）。
+已完成：工程骨架、配置与日志、统一异常、跨域、API 文档、健康检查、Alembic 迁移链路、前端基础布局、容器化；数据库设计与项目管理模块（5 张业务表、迁移脚本、项目/任务 REST API、分页与参数校验、pytest 用例）；中间文件管理模块（文件上传 / 下载 / 元数据 / 版本管理 / SHA256 / 文件状态，扩展名白名单与内容嗅探、路径穿越与超限防护）；LangGraph 研发工作流与人工审批模块（工作流图与模拟节点、Checkpointer 状态持久化、`interrupt()` 人工审批、审批记录落库、幂等与重启恢复、工作流 REST API）。
 
-未实现（后续阶段）：`workflow_instances` 的对外 HTTP 接口（表与服务层已就绪）、前端项目管理页面、AI Agent 与工作流实现、认证与权限、CI/CD。
+未实现（后续阶段）：前端项目管理与审批页面、真实大模型 / Agent 节点、认证与权限、CI/CD。
