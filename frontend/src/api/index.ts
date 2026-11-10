@@ -1,2 +1,7 @@
 export * from './client'
 export * from './health'
+export * from './projects'
+export * from './tasks'
+export * from './artifacts'
+export * from './workflows'
+export * from './approvals'

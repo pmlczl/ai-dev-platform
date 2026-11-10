@@ -1,15 +1,46 @@
 <script setup lang="ts">
-import { useRoute } from 'vue-router'
+import { computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 import { useAppStore } from '@/stores'
 
 const appStore = useAppStore()
 const route = useRoute()
+const router = useRouter()
 
-const menus = [
-  { index: '/', title: '首页', icon: 'HomeFilled' },
-  { index: '/workbench', title: '工作台', icon: 'Monitor' },
-]
+/**
+ * The navigation is built from the routing table.
+ *
+ * A page that is added to the router shows up here - the menu never has to
+ * be maintained a second time.
+ */
+const menus = computed(() =>
+  router
+    .getRoutes()
+    .filter((item) => Boolean(item.meta?.title) && !item.meta?.hideInMenu)
+    .map((item) => ({
+      index: item.path,
+      title: item.meta.title as string,
+      icon: (item.meta.icon as string | undefined) ?? 'Menu',
+    })),
+)
+
+/**
+ * The entry that stays highlighted.
+ *
+ * A detail route points to the entry it belongs to - the project detail
+ * keeps the project management highlighted.
+ */
+const activeMenu = computed(() => {
+  const explicit = route.meta?.activeMenu
+  if (typeof explicit === 'string') {
+    return explicit
+  }
+  const match = menus.value.find(
+    (menu) => route.path === menu.index || route.path.startsWith(`${menu.index}/`),
+  )
+  return match?.index ?? route.path
+})
 </script>
 
 <template>
@@ -26,7 +57,7 @@ const menus = [
 
     <el-menu
       class="app-sidebar__menu"
-      :default-active="route.path"
+      :default-active="activeMenu"
       :collapse="appStore.sidebarCollapsed"
       :collapse-transition="false"
       router
