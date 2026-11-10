@@ -11,10 +11,11 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_workflow_runtime, pagination_params
+from app.models.enums import WorkflowStatus
 from app.schemas.common import Page, PageParams
 from app.schemas.workflow import (
     WorkflowEventRead,
@@ -26,6 +27,54 @@ from app.services import workflows as workflow_service
 from app.services.workflow_runtime import WorkflowRuntime
 
 router = APIRouter()
+
+
+@router.get(
+    "/workflows",
+    response_model=Page[WorkflowRead],
+    summary="分页查询工作流",
+    description=(
+        "可按状态、项目和任务过滤，按创建时间倒序返回。"
+        "返回的是工作流实例的视图，不包含图内部状态。"
+    ),
+)
+async def list_workflows(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    page: Annotated[PageParams, Depends(pagination_params)],
+    status_filter: Annotated[
+        WorkflowStatus | None,
+        Query(alias="status", description="按工作流状态过滤"),
+    ] = None,
+    project_id: Annotated[
+        UUID | None,
+        Query(description="只返回指定项目下的工作流"),
+    ] = None,
+    task_id: Annotated[
+        UUID | None,
+        Query(description="只返回指定任务下的工作流"),
+    ] = None,
+) -> Page[WorkflowRead]:
+    return await workflow_service.list_workflows(
+        db,
+        page,
+        status=status_filter,
+        project_id=project_id,
+        task_id=task_id,
+    )
+
+
+@router.get(
+    "/tasks/{task_id}/workflows",
+    response_model=Page[WorkflowRead],
+    summary="查询任务的工作流列表",
+    description="返回该任务关联的全部工作流实例，包括已经结束的历史实例。",
+)
+async def list_task_workflows(
+    task_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    page: Annotated[PageParams, Depends(pagination_params)],
+) -> Page[WorkflowRead]:
+    return await workflow_service.list_task_workflows(db, task_id, page)
 
 
 @router.post(

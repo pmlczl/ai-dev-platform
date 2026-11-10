@@ -61,6 +61,7 @@ from app.services.workflow_store import (
     find_active_instance,
     get_instance,
     list_events,
+    list_instances,
     now,
     update_instance,
 )
@@ -434,6 +435,51 @@ async def list_workflow_logs(
     return build_page(items, total, params)
 
 
+async def list_workflows(
+    session: AsyncSession,
+    params: PageParams,
+    status: WorkflowStatus | None = None,
+    project_id: UUID | None = None,
+    task_id: UUID | None = None,
+) -> Page[WorkflowRead]:
+    """Return one page of the workflow instances.
+
+    The filters can be combined freely - the caller may ask for the runs of
+    one project, of one task or for the runs that wait for an approval. The
+    view of every row is the same view the detail endpoint returns; the state
+    of the graph is never part of it.
+    """
+
+    instances, total = await list_instances(
+        session,
+        params,
+        status=status,
+        project_id=project_id,
+        task_id=task_id,
+    )
+    items = await _to_read_many(session, instances)
+    return build_page(items, total, params)
+
+
+async def list_task_workflows(
+    session: AsyncSession,
+    task_id: UUID,
+    params: PageParams,
+) -> Page[WorkflowRead]:
+    """Return one page of the workflow instances of one task.
+
+    Every run of the task is listed, including the ones that already reached
+    a terminal state - the history is part of the answer. A task that does
+    not exist (or was deleted) is reported as not found, exactly like the
+    detail endpoint of a task does.
+    """
+
+    await get_task(session, task_id)
+    instances, total = await list_instances(session, params, task_id=task_id)
+    items = await _to_read_many(session, instances)
+    return build_page(items, total, params)
+
+
 async def to_read(
     session: AsyncSession,
     instance: WorkflowInstance,
@@ -451,7 +497,67 @@ async def to_read(
         ApprovalTargetType.WORKFLOW_INSTANCE,
         instance.id,
     )
-    pending = _pending_approval(instance)
+    return _build_view(instance, artifact, approvals)
+
+
+async def _to_read_many(
+    session: AsyncSession,
+    instances: list[WorkflowInstance],
+) -> list[WorkflowRead]:
+    """Build the views of several instances with a constant number of queries.
+
+    A list endpoint is polled by the browser, so the rows are loaded with two
+    queries instead of two per instance.
+    """
+
+    if not instances:
+        return []
+
+    ids = [instance.id for instance in instances]
+    iterations = {instance.id: instance.iteration for instance in instances}
+
+    artifact_rows = (
+        await session.execute(
+            select(Artifact).where(Artifact.workflow_instance_id.in_(ids)),
+        )
+    ).scalars().all()
+    artifacts: dict[UUID, Artifact] = {}
+    for artifact in artifact_rows:
+        if artifact.workflow_instance_id is None:
+            continue
+        expected = _artifact_relative_path(
+            artifact.workflow_instance_id,
+            iterations.get(artifact.workflow_instance_id, 1),
+        )
+        if artifact.relative_path == expected:
+            artifacts[artifact.workflow_instance_id] = artifact
+
+    approval_rows = (
+        await session.execute(
+            select(ApprovalRecord)
+            .where(
+                ApprovalRecord.target_type == ApprovalTargetType.WORKFLOW_INSTANCE.value,
+                ApprovalRecord.target_id.in_(ids),
+            )
+            .order_by(ApprovalRecord.created_at, ApprovalRecord.sequence),
+        )
+    ).scalars().all()
+    approvals: dict[UUID, list[ApprovalRecord]] = {}
+    for record in approval_rows:
+        approvals.setdefault(record.target_id, []).append(record)
+
+    return [
+        _build_view(instance, artifacts.get(instance.id), approvals.get(instance.id, []))
+        for instance in instances
+    ]
+
+
+def _build_view(
+    instance: WorkflowInstance,
+    artifact: Artifact | None,
+    approvals: list[ApprovalRecord],
+) -> WorkflowRead:
+    """Assemble the view of one instance from the data that was loaded."""
 
     return WorkflowRead(
         id=instance.id,
@@ -474,7 +580,7 @@ async def to_read(
             if artifact is not None
             else None
         ),
-        pending_approval=pending,
+        pending_approval=_pending_approval(instance),
         approvals=[
             WorkflowApprovalRead.model_validate(record) for record in approvals
         ],

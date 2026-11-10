@@ -166,6 +166,41 @@ async def append_event(
     return record
 
 
+async def list_instances(
+    session: AsyncSession,
+    params: PageParams,
+    status: WorkflowStatus | None = None,
+    project_id: UUID | None = None,
+    task_id: UUID | None = None,
+) -> tuple[list[WorkflowInstance], int]:
+    """Return one page of workflow instances and the total number of rows.
+
+    The filters can be combined freely. The rows are ordered by their creation
+    time, newest first; the id breaks a tie so that the order of two rows that
+    were written in the same second is stable.
+    """
+
+    stmt = select(WorkflowInstance)
+
+    if status is not None:
+        stmt = stmt.where(WorkflowInstance.status == status.value)
+    if project_id is not None:
+        stmt = stmt.where(WorkflowInstance.project_id == project_id)
+    if task_id is not None:
+        stmt = stmt.where(WorkflowInstance.task_id == task_id)
+
+    count_stmt = select(func.count()).select_from(stmt.order_by(None).subquery())
+    total = int(await session.scalar(count_stmt) or 0)
+
+    stmt = (
+        stmt.order_by(WorkflowInstance.created_at.desc(), WorkflowInstance.id)
+        .offset(params.offset)
+        .limit(params.limit)
+    )
+    instances = list((await session.execute(stmt)).scalars().all())
+    return instances, total
+
+
 async def list_events(
     session: AsyncSession,
     workflow_instance_id: UUID,
