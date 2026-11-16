@@ -1,5 +1,6 @@
 import { http } from './client'
 
+import type { RequestOptions } from './client'
 import type {
   ArtifactRead,
   ArtifactReviewRequest,
@@ -84,9 +85,11 @@ function buildUploadForm(payload: ArtifactUploadPayload): FormData {
 export async function fetchTaskArtifacts(
   taskId: string,
   params: ArtifactListParams = {},
+  options: RequestOptions = {},
 ): Promise<Page<ArtifactRead>> {
   const { data } = await http.get<Page<ArtifactRead>>(`/tasks/${taskId}/artifacts`, {
     params,
+    silent: options.silent,
   })
   return data
 }
@@ -97,14 +100,28 @@ export async function fetchArtifact(artifactId: string): Promise<ArtifactRead> {
   return data
 }
 
+/** Progress callback of an upload - `percent` is 0..100. */
+export type UploadProgressHandler = (percent: number) => void
+
 /** Upload a file into a task. */
 export async function uploadArtifact(
   taskId: string,
   payload: ArtifactUploadPayload,
+  onProgress?: UploadProgressHandler,
 ): Promise<ArtifactRead> {
   const { data } = await http.post<ArtifactRead>(
     `/tasks/${taskId}/artifacts`,
     buildUploadForm(payload),
+    {
+      // Uploads of a large file take longer than a JSON request.
+      timeout: 120000,
+      silent: true,
+      onUploadProgress: (event) => {
+        if (onProgress && event.total) {
+          onProgress(Math.min(100, Math.round((event.loaded / event.total) * 100)))
+        }
+      },
+    },
   )
   return data
 }
@@ -132,9 +149,11 @@ export async function createArtifactRevision(
 /** Download the content of a file. */
 export async function downloadArtifact(
   artifactId: string,
+  options: RequestOptions = {},
 ): Promise<ArtifactDownload> {
   const response = await http.get(`/artifacts/${artifactId}/download`, {
     responseType: 'blob',
+    silent: options.silent,
   })
   const headers = response.headers as unknown as Record<string, string>
   return {

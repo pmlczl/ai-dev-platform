@@ -10,16 +10,28 @@
 export const EMPTY_TEXT = '—'
 
 /**
+ * Parse an ISO timestamp of the backend.
+ *
+ * The backend writes every timestamp in UTC. PostgreSQL answers them with
+ * an offset (`+00:00`); SQLite drops the offset and answers a naive string.
+ * A naive string is therefore read as UTC, so both databases show the same
+ * local time in the browser.
+ */
+export function parseDateTime(value: string): Date {
+  const naive = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(value)
+  return new Date(naive ? `${value.replace(' ', 'T')}Z` : value)
+}
+
+/**
  * Format an ISO timestamp as `YYYY-MM-DD HH:mm:ss`.
  *
- * The backend sends a timezone aware ISO string; it is converted into the
- * local time of the browser.
+ * The timestamp is converted into the local time of the browser.
  */
 export function formatDateTime(value?: string | null, fallback = EMPTY_TEXT): string {
   if (!value) {
     return fallback
   }
-  const date = new Date(value)
+  const date = parseDateTime(value)
   if (Number.isNaN(date.getTime())) {
     return value
   }
@@ -35,7 +47,7 @@ export function formatDate(value?: string | null, fallback = EMPTY_TEXT): string
   if (!value) {
     return fallback
   }
-  const date = new Date(value)
+  const date = parseDateTime(value)
   if (Number.isNaN(date.getTime())) {
     return value
   }
@@ -111,7 +123,7 @@ export function formatRelativeTime(value?: string | null, fallback = EMPTY_TEXT)
   if (!value) {
     return fallback
   }
-  const date = new Date(value)
+  const date = parseDateTime(value)
   if (Number.isNaN(date.getTime())) {
     return value
   }
@@ -135,4 +147,40 @@ export function formatRelativeTime(value?: string | null, fallback = EMPTY_TEXT)
     return `${days} 天前`
   }
   return formatDate(value)
+}
+
+/**
+ * Describe how much time passed since a timestamp was written.
+ *
+ * `formatRelativeTime` answers when something happened; this answers how long
+ * it has been going on, which is what a queue of waiting requests shows. The
+ * amount is rounded down to two units at most and never goes negative: a
+ * timestamp in the future - the clock of the backend and of the browser are
+ * not always in step - is reported as "不足 1 分钟" instead of a nonsense
+ * duration.
+ */
+export function formatElapsedSince(value?: string | null, fallback = EMPTY_TEXT): string {
+  if (!value) {
+    return fallback
+  }
+  const date = parseDateTime(value)
+  if (Number.isNaN(date.getTime())) {
+    return fallback
+  }
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000)
+  if (seconds < 60) {
+    return '不足 1 分钟'
+  }
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) {
+    return `${minutes} 分钟`
+  }
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) {
+    const rest = minutes % 60
+    return rest === 0 ? `${hours} 小时` : `${hours} 小时 ${rest} 分`
+  }
+  const days = Math.floor(hours / 24)
+  const rest = hours % 24
+  return rest === 0 ? `${days} 天` : `${days} 天 ${rest} 小时`
 }

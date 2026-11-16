@@ -1,5 +1,6 @@
 import { http } from './client'
 
+import type { RequestOptions } from './client'
 import type {
   Page,
   WorkflowEventRead,
@@ -21,14 +22,23 @@ export interface WorkflowListParams {
 /** Fetch one page of the workflow runs, newest first. */
 export async function fetchWorkflows(
   params: WorkflowListParams = {},
+  options: RequestOptions = {},
 ): Promise<Page<WorkflowRead>> {
-  const { data } = await http.get<Page<WorkflowRead>>('/workflows', { params })
+  const { data } = await http.get<Page<WorkflowRead>>('/workflows', {
+    params,
+    silent: options.silent,
+  })
   return data
 }
 
 /** Fetch the details of one workflow run. */
-export async function fetchWorkflow(workflowId: string): Promise<WorkflowRead> {
-  const { data } = await http.get<WorkflowRead>(`/workflows/${workflowId}`)
+export async function fetchWorkflow(
+  workflowId: string,
+  options: RequestOptions = {},
+): Promise<WorkflowRead> {
+  const { data } = await http.get<WorkflowRead>(`/workflows/${workflowId}`, {
+    silent: options.silent,
+  })
   return data
 }
 
@@ -71,10 +81,11 @@ export async function resumeWorkflow(
 export async function fetchWorkflowLogs(
   workflowId: string,
   params: { page?: number; page_size?: number } = {},
+  options: RequestOptions = {},
 ): Promise<Page<WorkflowEventRead>> {
   const { data } = await http.get<Page<WorkflowEventRead>>(
     `/workflows/${workflowId}/logs`,
-    { params },
+    { params, silent: options.silent },
   )
   return data
 }
