@@ -1,5 +1,6 @@
 import { http } from './client'
 
+import type { RequestOptions } from './client'
 import type {
   Page,
   ProjectCreate,
@@ -19,17 +20,29 @@ export interface ProjectListParams {
   keyword?: string
 }
 
+/** Options of a request of the project list. */
+export type ProjectListOptions = RequestOptions
+
 /** Fetch one page of the projects. */
 export async function fetchProjects(
   params: ProjectListParams = {},
+  options: ProjectListOptions = {},
 ): Promise<Page<ProjectListItem>> {
-  const { data } = await http.get<Page<ProjectListItem>>('/projects', { params })
+  const { data } = await http.get<Page<ProjectListItem>>('/projects', {
+    params,
+    silent: options.silent,
+  })
   return data
 }
 
 /** Fetch the details of one project. */
-export async function fetchProject(projectId: string): Promise<ProjectRead> {
-  const { data } = await http.get<ProjectRead>(`/projects/${projectId}`)
+export async function fetchProject(
+  projectId: string,
+  options: RequestOptions = {},
+): Promise<ProjectRead> {
+  const { data } = await http.get<ProjectRead>(`/projects/${projectId}`, {
+    silent: options.silent,
+  })
   return data
 }
 
@@ -64,9 +77,11 @@ export interface ProjectTaskListParams {
 export async function fetchProjectTasks(
   projectId: string,
   params: ProjectTaskListParams = {},
+  options: RequestOptions = {},
 ): Promise<Page<TaskRead>> {
   const { data } = await http.get<Page<TaskRead>>(`/projects/${projectId}/tasks`, {
     params,
+    silent: options.silent,
   })
   return data
 }
