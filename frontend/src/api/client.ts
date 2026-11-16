@@ -41,6 +41,44 @@ declare module 'axios' {
   }
 }
 
+/** Options every read request of the API modules accepts. */
+export interface RequestOptions {
+  /**
+   * Do not show the automatic error notification of the client.
+   *
+   * A page that shows the failure itself - in its own error state - sets this
+   * flag, so that the user does not get the message twice.
+   */
+  silent?: boolean
+}
+
+/** The HTTP status of a failed request, `0` when no response arrived. */
+export function extractStatus(error: unknown): number {
+  if (!axios.isAxiosError(error)) {
+    return 0
+  }
+  return error.response?.status ?? 0
+}
+
+/** True when the request failed because the object does not exist. */
+export function isNotFoundError(error: unknown): boolean {
+  return extractStatus(error) === 404
+}
+
+/** True when the request failed because of the state of the object. */
+export function isConflictError(error: unknown): boolean {
+  return extractStatus(error) === 409
+}
+
+/** Read the `detail` of the error envelope, typed by the caller. */
+export function extractErrorDetail<T = unknown>(error: unknown): T | null {
+  if (!axios.isAxiosError<ApiErrorPayload>(error)) {
+    return null
+  }
+  const detail = error.response?.data?.detail
+  return detail === undefined || detail === null ? null : (detail as T)
+}
+
 /**
  * The hint that is put in front of the message of the backend.
  *
@@ -82,6 +120,22 @@ function readHeader(headers: unknown, name: string): string | null {
 }
 
 /**
+ * The text of a failure that never reached the backend.
+ *
+ * axios reports those with an English message (`Network Error`, `timeout of
+ * 15000ms exceeded`); the user gets the reason in plain words instead.
+ */
+function describeTransportError(error: AxiosError): string {
+  if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
+    return '请求超时，请检查网络或稍后重试'
+  }
+  if (error.code === 'ERR_CANCELED') {
+    return '请求已取消'
+  }
+  return '网络连接失败，无法访问后端服务，请检查网络或后端是否已启动'
+}
+
+/**
  * Build the text that is shown to the user.
  *
  * The text always carries the `request_id` of the backend: it is the only
@@ -92,14 +146,19 @@ export function describeApiError(error: unknown): string {
     return extractErrorMessage(error)
   }
 
-  const payload = error.response?.data
+  if (!error.response) {
+    return describeTransportError(error)
+  }
+
+  const payload = error.response.data
   const code = payload?.code ?? 'APP_ERROR'
   const hint = ERROR_HINTS[code] ?? ERROR_HINTS.APP_ERROR
-  const message = payload?.message ?? error.message ?? '请求失败'
+  const message =
+    payload?.message ?? `服务返回了异常状态 ${error.response.status}`
   const requestId =
-    payload?.request_id ?? readHeader(error.response?.headers, 'x-request-id')
+    payload?.request_id ?? readHeader(error.response.headers, 'x-request-id')
 
-  const head = code === 'APP_ERROR' && !payload ? message : `${hint}：${message}`
+  const head = `${hint}：${message}`
   return requestId ? `${head}（request_id: ${requestId}）` : head
 }
 
@@ -117,7 +176,9 @@ http.interceptors.response.use(
     const code = payload?.code ?? 'APP_ERROR'
     const requestId =
       payload?.request_id ?? readHeader(error.response?.headers, 'x-request-id')
-    const message = payload?.message ?? error.message ?? '请求失败'
+    const message = error.response
+      ? (payload?.message ?? `服务返回了异常状态 ${error.response.status}`)
+      : describeTransportError(error)
 
     const enriched = Object.assign(error, {
       message,

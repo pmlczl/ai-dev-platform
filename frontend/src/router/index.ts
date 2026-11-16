@@ -41,10 +41,17 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '项目详情', hideInMenu: true, activeMenu: '/projects' },
   },
   {
+    // The list of every task - the backend lists tasks across projects.
+    path: '/tasks',
+    name: 'tasks',
+    component: () => import('@/views/tasks/TaskListView.vue'),
+    meta: { title: '任务管理', icon: 'List' },
+  },
+  {
     path: '/tasks/:task_id',
     name: 'task-detail',
     component: () => import('@/views/tasks/TaskDetailView.vue'),
-    meta: { title: '任务详情', hideInMenu: true },
+    meta: { title: '任务详情', hideInMenu: true, activeMenu: '/tasks' },
   },
   {
     // The monitoring of the runs has its own entry: it stays reachable even
@@ -55,10 +62,22 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '工作流监控', icon: 'Connection' },
   },
   {
+    path: '/workflows/:workflow_id',
+    name: 'workflow-detail',
+    component: () => import('@/views/workflows/WorkflowDetailView.vue'),
+    meta: { title: '工作流详情', hideInMenu: true, activeMenu: '/workflows' },
+  },
+  {
     path: '/approvals',
     name: 'approvals',
     component: () => import('@/views/approvals/ApprovalQueueView.vue'),
     meta: { title: '人工审批', icon: 'Stamp' },
+  },
+  {
+    path: '/approvals/:workflow_id',
+    name: 'approval-detail',
+    component: () => import('@/views/approvals/ApprovalDetailView.vue'),
+    meta: { title: '审批详情', hideInMenu: true, activeMenu: '/approvals' },
   },
   {
     path: '/:pathMatch(.*)*',

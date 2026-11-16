@@ -1,10 +1,35 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 import { useAppStore } from '@/stores'
 
 const appStore = useAppStore()
+const route = useRoute()
+const router = useRouter()
 const loading = ref(false)
+
+/**
+ * The trail of the page.
+ *
+ * A detail route names the navigation entry it belongs to (`meta.activeMenu`),
+ * so the trail shows that entry before the title of the page itself.
+ */
+const trail = computed(() => {
+  const items: Array<{ title: string; to: string | null }> = []
+  if (route.path === '/') {
+    return items
+  }
+  const parentPath = route.meta.activeMenu
+  if (typeof parentPath === 'string' && parentPath !== route.path) {
+    const parent = router.getRoutes().find((item) => item.path === parentPath)
+    if (parent?.meta.title) {
+      items.push({ title: parent.meta.title as string, to: parentPath })
+    }
+  }
+  items.push({ title: (route.meta.title as string | undefined) ?? '', to: null })
+  return items
+})
 
 onMounted(async () => {
   await appStore.refreshBackendStatus()
@@ -30,8 +55,12 @@ async function handleRefresh(): Promise<void> {
       </el-button>
       <el-breadcrumb separator="/">
         <el-breadcrumb-item :to="{ path: '/' }">首页</el-breadcrumb-item>
-        <el-breadcrumb-item v-if="$route.path !== '/'">
-          {{ $route.meta.title ?? '' }}
+        <el-breadcrumb-item
+          v-for="item in trail"
+          :key="item.title"
+          :to="item.to ? { path: item.to } : undefined"
+        >
+          {{ item.title }}
         </el-breadcrumb-item>
       </el-breadcrumb>
     </div>

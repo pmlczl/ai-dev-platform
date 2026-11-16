@@ -6,7 +6,12 @@ import AppSidebar from '@/components/layout/AppSidebar.vue'
 <template>
   <el-container class="app-layout">
     <AppSidebar />
-    <el-container class="app-layout__body">
+    <!--
+      The header is a wrapper component, so Element Plus cannot detect it and
+      infer the vertical direction of this container on its own - it has to
+      be stated, otherwise the header and the main area sit side by side.
+    -->
+    <el-container class="app-layout__body" direction="vertical">
       <AppHeader />
       <el-main class="app-layout__main">
         <router-view />
