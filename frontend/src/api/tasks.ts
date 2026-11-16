@@ -1,5 +1,6 @@
 import { http } from './client'
 
+import type { RequestOptions } from './client'
 import type {
   Page,
   TaskCreate,
@@ -23,14 +24,23 @@ export interface TaskListParams {
 /** Fetch one page of the tasks. */
 export async function fetchTasks(
   params: TaskListParams = {},
+  options: RequestOptions = {},
 ): Promise<Page<TaskRead>> {
-  const { data } = await http.get<Page<TaskRead>>('/tasks', { params })
+  const { data } = await http.get<Page<TaskRead>>('/tasks', {
+    params,
+    silent: options.silent,
+  })
   return data
 }
 
 /** Fetch the details of one task. */
-export async function fetchTask(taskId: string): Promise<TaskRead> {
-  const { data } = await http.get<TaskRead>(`/tasks/${taskId}`)
+export async function fetchTask(
+  taskId: string,
+  options: RequestOptions = {},
+): Promise<TaskRead> {
+  const { data } = await http.get<TaskRead>(`/tasks/${taskId}`, {
+    silent: options.silent,
+  })
   return data
 }
 
@@ -58,9 +68,11 @@ export async function updateTask(
 export async function fetchTaskWorkflows(
   taskId: string,
   params: { page?: number; page_size?: number } = {},
+  options: RequestOptions = {},
 ): Promise<Page<WorkflowRead>> {
   const { data } = await http.get<Page<WorkflowRead>>(`/tasks/${taskId}/workflows`, {
     params,
+    silent: options.silent,
   })
   return data
 }
